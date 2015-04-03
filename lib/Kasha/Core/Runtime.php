@@ -514,7 +514,10 @@ class Runtime
 		$this->epilogueAction('p', array('page' => &$page));
 
 		try {
-			print $page->render();
+			// Render the page
+			/** @var $pageRenderer PageRenderer */
+			$pageRenderer = $this->getPageRenderer();
+			print $pageRenderer->render($page);
 			$this->sendWarnings();
 		} catch(\Exception $ex) {
 			$this->sendWarnings();
@@ -593,6 +596,11 @@ class Runtime
 		$page->addModuleAssets($this->moduleName);
 
 		return $page;
+	}
+
+	public function getPageRenderer()
+	{
+		return new PageRenderer();
 	}
 
 	/**
