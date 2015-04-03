@@ -30,6 +30,7 @@ class Runtime
 	// variables to hold current action context
 	public $moduleName;
 	public $actionName;
+	public $isSharedModule = false;
 
 	/** @var null Runtime */
 	private static $instance = null;
@@ -378,7 +379,7 @@ class Runtime
 			$this->setContextItem('executionContext', 'web');
 		}
 		// $actionType and $actionPath can be used inside of prologue action for more fine-grained access control or whatever.
-		$fileName = $this->config['folders']['app'] . 'modules/'.$this->moduleName.'/actions/_epilogue.php';
+		$fileName = Locator::getAppModulePath($this->moduleName, "actions/_epilogue.php");
 		if ($fileName != '' && file_exists($fileName)) {
 			if ($actionType == 'p') {
 				$page = $context['page'];
@@ -603,19 +604,24 @@ class Runtime
 	 */
 	public function checkAction($fullAction)
 	{
-		$fileName = '';
+		$config = Config::getInstance();
 
+		$fileName = '';
 		list($module, $action) = explode('/', trim($fullAction), 2);
 		$this->moduleName = $module;
 		$this->actionName = $action;
-		$this->sharedModule = false;
+		$this->isSharedModule = false;
 		if ($module != '' && $action != '') {
-			$fileName = $this->config['folders']['app'] . "modules/$module/actions/$action.php";
+
+			$appFolder = $config->getFolderPath('app');
+			$sharedFolder = $config->getFolderPath('shared');
+
+			$fileName = Locator::getAppModuleFilePath($module, "actions/$action.php");
 			if (!file_exists($fileName)) {
 				// module is not defined for the application => search shared space
-				$fileName = $this->config['folders']['shared'] . "modules/$module/actions/$action.php";
+				$fileName = Locator::getSharedModuleFilePath($module, "actions/$action.php");
 				if (file_exists($fileName)) {
-					$this->sharedModule = true;
+					$this->isSharedModule = true;
 				} else {
 					$fileName = '';
 				}
