@@ -17,6 +17,8 @@ class Runtime
 	 */
 	private $muted = false;
 
+	private $warnings = array();
+
 	/**
 	 * @param boolean $muted
 	 */
@@ -419,13 +421,121 @@ class Runtime
     }
 
 	/**
+	 * Renders page flash message (informational or error) and cleans up session
+	 *  Extend this function in your implementation of the framework!
+	 *
+	 * @return string
+	 */
+	public function renderFlashMessage()
+	{
+		$flash = Util::lavnn('flash', $_SESSION, '');
+		$error = Util::lavnn('error', $_SESSION, '');
+		$output = '';
+		if ($flash != '') {
+			// rendering code to be injected here
+			unset($_SESSION['flash']);
+		}
+		if ($error != '') {
+			// rendering code to be injected here
+			unset($_SESSION['error']);
+		}
+
+		return $output;
+	}
+
+	/**
+	 * Renders ajax flash message (informational or error) and cleans up session.
+	 *  Extend this function in your implementation of the framework!
+	 *
+	 * @return string
+	 */
+	public function renderAjaxFlashMessage()
+	{
+		$output = '';
+
+		if (array_key_exists('ajaxFlash', $_SESSION)) {
+			// rendering code to be injected here
+			unset($_SESSION['ajaxFlash']);
+		}
+		if (array_key_exists('ajaxError', $_SESSION)) {
+			// rendering code to be injected here
+			unset($_SESSION['ajaxError']);
+		}
+
+		return $output;
+	}
+
+	protected function routeFormAction($f, $fileName)
+	{
+		$this->prologueAction('f', $f);
+		require $fileName;
+	}
+
+	protected function routeInlineAction($i, $fileName)
+	{
+		$this->prologueAction('i', $i);
+		print $this->renderAjaxFlashMessage();
+		require $fileName;
+	}
+
+	protected function routeJsonAction($json)
+	{
+		$this->prologueAction('json', $json);
+		if ($fileName = $this->checkAction($json)) {
+			require $fileName;
+		}
+	}
+
+	protected function routePdfAction($pdf, $fileName)
+	{
+		$this->prologueAction('pdf', $pdf);
+		require $fileName;
+	}
+
+	protected function routePageAction($p, $fileName)
+	{
+		$this->prologueAction('p', $p);
+		// in some cases, sent url could not contain hash, so it was encoded with "_hash" parameter
+		$urlHash = Util::lavnn('_hash', $_REQUEST, '');
+		if ($urlHash != '') {
+			$url = self::getNextUrl();
+			self::redirect($url);
+		}
+
+		// create a new Page object
+		/** @var $page Page */
+		$page = $this->createPage();
+		// Assets which are actions-specific, should be explicitly included by those actions
+
+		require $fileName;
+		// add flash messages after action was included, because it can add things there
+		$page->add('flashMessages', $this->renderFlashMessage());
+		$this->epilogueAction('p', array('page' => &$page));
+
+		try {
+			print $page->render();
+			$this->sendWarnings();
+		} catch(\Exception $ex) {
+			$this->sendWarnings();
+		}
+	}
+
+	protected function routeCronAction($cron, $fileName)
+	{
+		$this->prologueAction('cron', $cron); // this will also set special executionContext
+		if ($fileName = $this->checkAction($cron)) {
+			require $fileName;
+		}
+		$this->sendWarnings('none');
+	}
+
+	/**
 	 * Routes HTTP request to proper action file
 	 *
 	 * @param array $request
 	 */
 	public function route($request)
 	{
-        $config = Config::getInstance();
 		$f = Util::lavnn('f', $request, '');
 		$i = Util::lavnn('i', $request, '');
 		$json = Util::lavnn('json', $request, '');
@@ -433,95 +543,55 @@ class Runtime
 		$p = Util::lavnn('p', $request, '');
 		$cron = Util::lavnn('cron', $request, '');
 		if ($f != '' && $fileName = $this->checkAction($f)) {
-			$this->prologueAction('f', $f);
-			$this->addProfilerMessage("Started to include action $f");
-			require $fileName;
-			$this->addProfilerMessage("Finished to include action $f");
-			$this->sendWarnings();
+			$this->routeFormAction($f, $fileName);
 			exit();
 		} elseif ($i != '' && $fileName = $this->checkAction($i)) {
-			$this->prologueAction('i', $i);
-			print $this->renderAjaxFlashMessage();
-			$this->addProfilerMessage("Started to include action $i");
-			require $fileName;
-			$this->addProfilerMessage("Finished to include action $i");
-			$this->sendWarnings();
+			$this->routeInlineAction($i, $fileName);
 			exit();
 		} elseif ($json != '') {
-			$this->prologueAction('json', $json);
 			// JSON is a special case. We need to ensure that output is at least empty array.
 			//  Therefore, we cannot rely on default behaviour if request is not routed.
 			//  So, we still serve some output if action is not found.
 			//  Consumer is then responsible to check the structure of returned JSON
-			$this->addProfilerMessage("Started to include action $json");
 			$output = array();
-			//@TODO write docs about json actions setting up $output array
-			if ($fileName = $this->checkAction($json)) {
-				require $fileName;
-			}
+			$this->routeJsonAction($json);
 			print json_encode($output);
-			$this->addProfilerMessage("Finished to include action $json");
-			$this->sendWarnings('none'); // do not mess with json
 			exit();
 		} elseif ($pdf != ''&& $fileName = $this->checkAction($pdf)) {
-			$this->prologueAction('pdf', $pdf);
-			require $fileName;
+			$this->routePdfAction($pdf, $fileName);
 			exit();
 		} elseif ($p != '' && $fileName = $this->checkAction($p)) {
-			$this->prologueAction('p', $p);
-			// in some cases, sent url could not contain hash, so it was encoded with "_hash" parameter
-			$urlHash = Util::lavnn('_hash', $_REQUEST, '');
-			if ($urlHash != '') {
-				$url = self::getNextUrl();
-				self::redirect($url);
-			}
-			$this->addProfilerMessage("Started to include action $p");
-			$page = new Page(); // introduce $page variable for action
-			$page->checkMultilingualSetup($this->isMultilingual());
-
-			// Add assets that are common for all p-actions
-			$page->addCommonAssets();
-			// Add assets that are common for all p-actions of given module
-			$page->addModuleAssets($this->moduleName);
-
-			// Assets which are actions-specific, should be explicitly included by those actions
-			$page->add('lastPage', $this->getNextUrl());
-			$isAdmin = (isset($_SESSION['user']) && $_SESSION['user']['is_admin'] == 1);
-			if (!$isAdmin && !isset($_SESSION['user']['impersonator']) && !self::isTilpyIP()) {
-				$page->add('analytics', TextProcessor::doTemplate('main', 'index.analytics'));
-			}
-			$page->add('envStickyOverlay', TextProcessor::doTemplate('main', 'envStickyOverlay.' . strtolower($config['ENV'])));
-			require $fileName;
-			// add flash messages after action was included, because it can add things there
-			$page->add('flashMessages', $this->renderFlashMessage());
-			$this->epilogueAction('p', array('page' => &$page));
-			$this->addProfilerMessage("Ready to render full page...");
-			try {
-				print $page->render();
-				$this->addProfilerMessage("...done. Finished to include action $p");
-				if (!$this->muted) {
-					$this->sendWarnings();
-					Profiler::getInstance()->sendReport();
-				}
-			} catch(\Exception $ex) {
-				$this->addWarning("...failed. Exception: " . $ex->getMessage());
-				if (!$this->muted) {
-					$this->sendWarnings();
-					Profiler::getInstance()->sendReport();
-				}
-			}
+			$this->routePageAction($p, $fileName);
 			exit();
 		} elseif ($cron != '' && $fileName = $this->checkAction($cron)) {
-			$this->prologueAction('cron', $cron); // this will also set special executionContext
-			$this->addProfilerMessage("Started to include action $cron");
-			if ($fileName = $this->checkAction($cron)) {
-				require $fileName;
-			}
-			$this->addProfilerMessage("Finished to include action $cron");
-			$this->sendWarnings('none');
+			$this->routeCronAction($cron, $fileName);
 			exit();
 		}
+
+		// Nothing was matched!
 		HttpResponse::dynamic404();
+	}
+
+	/**
+	 * Create a new page.
+	 *  Extend this method if standard Page class is not enough
+	 *
+	 * @return Page
+	 */
+	public function createPage()
+	{
+		$page = new Page(); // introduce $page variable for action
+		$page->checkMultilingualSetup($this->isMultilingual());
+
+		// log the last viewed page in the Page object itself
+		$page->add('lastPage', $this->getNextUrl());
+
+		// Add assets that are common for all p-actions
+		$page->addCommonAssets();
+		// Add assets that are common for all p-actions of given module
+		$page->addModuleAssets($this->moduleName);
+
+		return $page;
 	}
 
 	/**
@@ -579,6 +649,51 @@ class Runtime
 	{
 		header("Location:$uri");
 		exit(); // prevent other code from executing
+	}
+
+	/**
+	 * Registers warning
+	 *
+	 * @param string $warning
+	 */
+	public function addWarning($warning)
+	{
+		$debugInfo = debug_backtrace();
+		if (count($debugInfo) > 0) {
+			$caller = $debugInfo[0]['class'] . ':' . $debugInfo[0]['function'];
+			$codeLine = $debugInfo[0]['file'] . ':' . $debugInfo[0]['line'];
+			$warning = 'Error in ' . $caller . ' at ' . $codeLine . ' with warning:' . $warning;
+		}
+		$this->warnings[] = $warning;
+	}
+
+	/**
+	 * Send accumulated warnings to site administrator by email (if allowed in the config)
+	 *
+	 * @param string $channel
+	 */
+	private function sendWarnings($channel = '')
+	{
+		if ($this->muted) {
+			$channel = 'none';
+		} elseif ($channel == '') {
+			$channel = Config::getInstance()->getEnvSetting('sendWarnings');
+		}
+		if (count($this->warnings) > 0) {
+			switch ($channel) {
+				case 'dump':
+					d($this->warnings);
+					break;
+				case 'hidden':
+					dh($this->warnings);
+					break;
+				case 'none':
+					// fall through to default
+				default:
+					// do nothing
+					break;
+			}
+		}
 	}
 
 	public static function forceDownload($fileName, $outputFileName = '', $deleteAfterUse = false)
