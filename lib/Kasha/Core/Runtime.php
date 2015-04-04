@@ -562,7 +562,7 @@ class Runtime
 	 *
 	 * @param string $channel
 	 */
-	private function sendWarnings($channel = '')
+	protected function sendWarnings($channel = '')
 	{
 
 		if ($this->muted) {
