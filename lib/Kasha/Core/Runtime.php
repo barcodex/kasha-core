@@ -4,7 +4,6 @@ namespace Kasha\Core;
 
 use Temple\Util;
 use Kasha\Templar\Locator;
-use Kasha\Templar\TextProcessor;
 
 class Runtime
 {
@@ -18,6 +17,14 @@ class Runtime
 	private $muted = false;
 
 	private $warnings = array();
+
+	/**
+	 * @return bool
+	 */
+	public function getMuted()
+	{
+		return $this->muted;
+	}
 
 	/**
 	 * @param boolean $muted
@@ -35,17 +42,8 @@ class Runtime
 	/** @var null Runtime */
 	private static $instance = null;
 
-	private $allCurrencies = array();
-	private $allSiteCurrencies = array();
-
-	private $allLanguages = array();
-	private $allSiteLanguages = array();
-	private $translatableLanguages = array();
-
 	public function __construct()
 	{
-		$this->checkMaintenance();
-
 		return $this;
 	}
 
@@ -76,109 +74,6 @@ class Runtime
 		return self::$instance;
 	}
 
-	public function getAllCurrencies()
-	{
-		if (count($this->allCurrencies) == 0) {
-			$this->allCurrencies = Model::getInstance('currency')->getList();
-		}
-
-		return $this->allCurrencies;
-	}
-
-	public function getAllSiteCurrencies()
-	{
-		if (count($this->allSiteCurrencies) == 0) {
-			$this->allSiteCurrencies = Model::getInstance('currency')->getList(array('is_enabled' => 1));
-		}
-
-		return $this->allSiteCurrencies;
-	}
-
-	public function getAllLanguages()
-	{
-		if (count($this->allLanguages) == 0) {
-			$this->allLanguages = Model::getInstance('human_language')->getList();
-		}
-
-		return $this->allLanguages;
-	}
-
-	public function getAllSiteLanguages()
-	{
-		if (count($this->allSiteLanguages) == 0) {
-			$this->allSiteLanguages = Model::getInstance('human_language')->getList(array('is_enabled' => 1));
-		}
-
-		return $this->allSiteLanguages;
-	}
-
-	public function getTranslatableLanguages()
-	{
-		if (count($this->translatableLanguages) == 0) {
-			$query = file_get_contents(__DIR__ . "/sql/ListTranslatableLanguages.sql");
-			$this->translatableLanguages = Database::getInstance()->getArray($query);
-		}
-
-		return $this->translatableLanguages;
-	}
-
-	/**
-	 * @param $scope - 'all', 'translatable' or 'site'
-	 *
-	 * @return array
-	 */
-	public function getLanguages($scope)
-	{
-		switch($scope) {
-			case 'all':
-				return $this->getAllLanguages();
-				break;
-			case 'translatable':
-				return $this->getTranslatableLanguages();
-				break;
-			case 'site':
-			default:
-				return $this->getAllSiteLanguages();
-				break;
-		}
-	}
-
-	public function getCurrencies($scope)
-	{
-		switch($scope) {
-			case 'all':
-				return $this->getAllCurrencies();
-				break;
-			case 'site':
-			default:
-				return $this->getAllSiteCurrencies();
-				break;
-		}
-	}
-
-	public function getLanguagesMap($excludeCodes = array())
-	{
-		$languagesMap = array();
-		foreach($this->getAllSiteLanguages() as $languageInfo) {
-			if (!in_array($languageInfo['code'], $excludeCodes)) {
-				$languagesMap[$languageInfo['code']] = $languageInfo;
-			}
-		}
-
-		return $languagesMap;
-	}
-
-	public function getCurrenciesMap($excludeCodes = array())
-	{
-		$currenciesMap = array();
-		foreach($this->getAllSiteCurrencies() as $currencyInfo) {
-			if (!in_array($currencyInfo['code'], $excludeCodes)) {
-				$currenciesMap[$currencyInfo['code']] = $currencyInfo;
-			}
-		}
-
-		return $currenciesMap;
-	}
 
 	public function hasContextItem($key)
 	{
@@ -193,27 +88,6 @@ class Runtime
 	public function setContextItem($key, $value)
 	{
 		$this->context[$key] = $value;
-	}
-
-	/**
-	 * Checks if site is closed for maintenance and reports corresponding error
-	 */
-	public function checkMaintenance()
-	{
-		if (Config::getInstance()->get('CLOSED') == 1) {
-			$this->fatalError('CLOSED_FOR_MAINTENANCE');
-			exit();
-		}
-	}
-
-	public function isMultilingual()
-	{
-		return count($this->getAllSiteLanguages()) > 1;
-	}
-
-	public function addProfilerMessage($text, $activityStarted = null)
-	{
-		Profiler::getInstance()->addMessage($text, $activityStarted);
 	}
 
 	/**
@@ -317,25 +191,19 @@ class Runtime
 	 */
 	public static function reroute($actionPath = '', $actionType = 'p', $params = array(),  $secure = false)
 	{
-		/** @var $r Runtime */
-		$r = self::$instance;
-
 		if ($actionPath == '') {
 			$actionType = 'p';
-			$actionPath = $r->getSetting('DEFAULT_PAGE');
+			$actionPath = Config::getInstance()->get('DEFAULT_PAGE');
 		}
 
-		$protocol = $secure ? 'https://' : 'http://';
-		$url = $protocol . $_SERVER['HTTP_HOST'];
-		if ($r->isMultilingual() || 1 == 1) { // always use language code
-			$url .= ('/' . $_SESSION['language']['code'] . "/$actionType/$actionPath");
-			if (array_key_exists($actionType, $params)) {
-				unset($params[$actionType]);
-			}
+		$url = self::getBaseUrl() . '/' . self::getUrlLanguagePrefix();
+		if (array_key_exists($actionType, $params)) {
+			$url = $url . $actionType . '/' . $actionPath;
+			unset($params[$actionType]);
 		} else {
-			$url .= $_SERVER['PHP_SELF'];
-			$params[$actionType] = $actionPath;
+			HttpResponse::dynamic404();
 		}
+
 		if (count($params) > 0) {
 			$url .= ('?'.http_build_query($params));
 		}
@@ -585,7 +453,7 @@ class Runtime
 	public function createPage()
 	{
 		$page = new Page(); // introduce $page variable for action
-		$page->checkMultilingualSetup($this->isMultilingual());
+		$page->checkMultilingualSetup();
 
 		// log the last viewed page in the Page object itself
 		$page->add('lastPage', $this->getNextUrl());
@@ -633,15 +501,15 @@ class Runtime
 				} else {
 					$fileName = '';
 				}
-				$this->addProfilerMessage("Did not find the file for action $fullAction");
+				$this->addWarning("Did not find the file for action $fullAction");
 			}
 			// Check unauthorized requests
 			if (!$this->checkAuthorization($module, $action)) {
-				$this->addProfilerMessage("Authorization check failed for action $fullAction");
+				$this->addWarning("Authorization check failed for action $fullAction");
 				$fileName = '';
 			}
 		} else {
-			$this->addProfilerMessage("Malformed action $fullAction");
+			$this->addWarning("Malformed action $fullAction");
 		}
 
 		return $fileName == '' ? false : $fileName;
@@ -682,33 +550,41 @@ class Runtime
 	}
 
 	/**
+	 * @return array
+	 */
+	public function getWarnings()
+	{
+		return $this->warnings;
+	}
+
+	/**
 	 * Send accumulated warnings to site administrator by email (if allowed in the config)
 	 *
 	 * @param string $channel
 	 */
 	private function sendWarnings($channel = '')
 	{
+
 		if ($this->muted) {
 			$channel = 'none';
 		} elseif ($channel == '') {
 			$channel = Config::getInstance()->getEnvSetting('sendWarnings');
 		}
-		if (count($this->warnings) > 0) {
-			switch ($channel) {
-				case 'dump':
-					d($this->warnings);
-					break;
-				case 'hidden':
-					dh($this->warnings);
-					break;
-				case 'none':
-					// fall through to default
-				default:
-					// do nothing
-					break;
-			}
+
+		if ($channel != 'none') {
+			$this->getReporter()->send($this, $channel);
 		}
+
 	}
+
+	/**
+	 * @return RuntimeReporterInterface
+	 */
+	public function getReporter()
+	{
+		return new RuntimeReporter();
+	}
+
 
 	public static function forceDownload($fileName, $outputFileName = '', $deleteAfterUse = false)
 	{

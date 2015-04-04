@@ -115,7 +115,7 @@ class Page
 		}
 	}
 
-	public function checkMultilingualSetup($multilingual = false)
+	public function checkMultilingualSetup($multilingual = true)
 	{
 		$multilingual = true; // we emulate multilingual in any way to make sure that language code is written in URLs
 		$templateName = 'scripts.' . ($multilingual ? 'polyglot' : 'monoglot') . '.js';
