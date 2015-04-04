@@ -17,6 +17,7 @@ class Page
 		'headScripts' => '',
 		'bodyScripts' => ''
 	);
+
 	private $styles = array();
 	private $cssFiles = array();
 	private $headScripts = array();
@@ -25,14 +26,63 @@ class Page
 	private $bodyJsFiles = array();
 	private $meta = array();
 	private $og = array(); // Open Graph tags, which we keep distinct from usual meta
-
 	public $masterTemplate = '';
+
+	public function getBodyJsFiles()
+	{
+		return $this->bodyJsFiles;
+	}
+
+	public function getBodyScripts()
+	{
+		return $this->bodyScripts;
+	}
+
+	public function getCcsFiles()
+	{
+		return $this->cssFiles;
+	}
+
+	public function getHeadJsFiles()
+	{
+		return $this->headJsFiles;
+	}
+
+	public function getHeadScripts()
+	{
+		return $this->headScripts;
+	}
+
+	public function getMeta()
+	{
+		return $this->meta;
+	}
+
+	public function getOg()
+	{
+		return $this->og;
+	}
+
+	public function getStyles()
+	{
+		return $this->styles;
+	}
+
+	public function getBlocks()
+	{
+		return $this->blocks;
+	}
 
 	public function __construct(
 		$masterTemplatePath = ''
 	) {
 		// Set up master template
 		$this->setMasterTemplate($masterTemplatePath);
+	}
+
+	public function getMasterTemplate()
+	{
+		return $this->masterTemplate;
 	}
 
 	/**
