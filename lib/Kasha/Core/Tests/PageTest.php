@@ -1,8 +1,8 @@
 <?php
 
-use Kasha\Core\Cache;
+use Kasha\Core\Page;
 
-class CacheTest extends PHPUnit_Framework_TestCase
+class PageTest extends PHPUnit_Framework_TestCase
 {
 	public function testDummy()
 	{
